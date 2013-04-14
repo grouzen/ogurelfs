@@ -3,8 +3,8 @@ target = ogurelfs
 objs = ogurel.o
 headers =
 
-LDFLAGS += `pkg-config fuse --libs`
-CFLAGS += -Wall -g3 `pkg-config fuse --cflags`
+LDFLAGS += `pkg-config fuse --libs` `./python_ldflags.py`
+CFLAGS += -std=c99 -Wall -g3 `pkg-config fuse --cflags` `./python_cflags.py`
 
 .PHONY: all clean
 

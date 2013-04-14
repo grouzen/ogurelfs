@@ -15,11 +15,7 @@ Search
 --------------------------------------------------------------------------------
 
 Search is initiated by directory or file creation on specific meta file system hierarchy:
-`
-/artists
-/albums
-/tracks
-`
+`/artists, /albums, /tracks`
 
 1. Searching artist
     - `mkdir artists/Artist` will search artist(s) and if finds will create directory
