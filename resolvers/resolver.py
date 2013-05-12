@@ -6,5 +6,3 @@ class Resolver:
 
     def resolve(self):
         print "Resolver resolve()"
-
-        

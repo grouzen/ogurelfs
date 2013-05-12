@@ -29,6 +29,13 @@
 
 #define OGUREL_CONTEXT ((struct ogurelfs *) fuse_get_context()->private_data)
 
+enum ogurelfs_dir {
+    OGURELFS_ROOT = 0,
+    OGURELFS_ARTIST,
+    OGURELFS_ALBUMS,
+    OGURELFS_TRACKS
+};
+
 struct ogurelfs_resolver {
     char *module_name;
     char *class_name;
@@ -44,6 +51,63 @@ struct ogurelfs {
     char *dbpath;
     struct ogurelfs_resolvers *resolvers;
 };
+
+
+static char *ogurelfs_dbpath(char *absolute, const char *relative)
+{
+    strncpy(absolute, OGUREL_CONTEXT->dbpath, PATH_MAX);
+    strncat(absolute, relative, PATH_MAX);
+
+    return absolute;
+}
+
+enum ogurelfs_dir ogurelfs_dir(const char *pathname)
+{
+    char *buf = NULL;
+    char *buforig = NULL;
+    int odir = OGURELFS_ROOT;
+
+    if(strcmp(pathname, "/")) {
+        buf = malloc(sizeof(char) * (strlen(pathname) + 1));
+        buforig = buf;
+        strcpy(buf, pathname);
+    
+        while((buf = strchr(buf, '/')) != NULL) {
+            buf++;
+            odir++;
+
+            if(odir > OGURELFS_ARTIST) {
+                if(!strncmp(buf, "tracks", 6)) {
+                    odir = OGURELFS_TRACKS;
+                }
+                
+                break;
+            }
+        }
+    
+        free(buforig);
+    }
+    
+    return odir;
+}
+
+char *ogurelfs_translate(const char *pathname, char *translate)
+{
+    int odir = ogurelfs_dir(pathname);
+
+    if(odir == OGURELFS_ALBUMS) {
+        for(int i = 0; i < strlen(pathname); i++) {
+            if(i > 0 && pathname[i] == '/') {
+                translate[i] = '\0';
+                break;
+            }
+
+            translate[i] = pathname[i];
+        }
+    }
+
+    return translate;
+}
 
 
 static struct ogurelfs_resolver *python_resolver_init(char *name)
@@ -122,14 +186,6 @@ static void python_destroy(struct ogurelfs *ogurelfs)
     return;
 }
 
-static char *ogurelfs_dbpath(char *absolute, const char *relative)
-{
-    strncpy(absolute, OGUREL_CONTEXT->dbpath, PATH_MAX);
-    strncat(absolute, relative, PATH_MAX);
-
-    return absolute;
-}
-
 static struct ogurelfs *ogurelfs_init()
 {
     struct ogurelfs *ogurelfs = malloc(sizeof(struct ogurelfs));
@@ -187,16 +243,19 @@ static int ogurel_opendir(const char *pathname, struct fuse_file_info *fi)
     DIR *dirp;
     char dbpath[PATH_MAX];
 
-    ogurelfs_dbpath(dbpath, pathname);
-    
-    DEBUG("opendir(): %s\n", dbpath);
-    
-    if(!(dirp = opendir(dbpath))) {
-        LOGERR("opendir(): %s: %s\n", dbpath, strerror(errno));
-        res = -errno;
-    }
+    if(ogurelfs_dir((char *) pathname) != OGURELFS_ARTIST) {
+        char translate[PATH_MAX];
 
-    fi->fh = (intptr_t) dirp;
+        ogurelfs_translate(pathname, translate);
+        ogurelfs_dbpath(dbpath, translate);
+        
+        if(!(dirp = opendir(dbpath))) {
+            LOGERR("opendir(): %s: %s\n", dbpath, strerror(errno));
+            res = -errno;
+        }
+    
+        fi->fh = (intptr_t) dirp;
+    }
 
     return res;
 }
@@ -207,23 +266,37 @@ static int ogurel_readdir(const char *pathname, void *buf,
     DIR *dirp;
     struct dirent *entry;
     char dbpath[PATH_MAX];
-
+    int odir;
+    
     ogurelfs_dbpath(dbpath, pathname);
     
     DEBUG("readdir(): %s\n", dbpath);
-    
-    dirp = (DIR *) (uintptr_t) fi->fh;
-    if(!(entry = readdir(dirp))) {
-        LOGERR("readdir(): %s: %s\n", dbpath, strerror(errno));
-        return -errno;
-    }
 
-    do {
-        if(filler(buf, entry->d_name, NULL, 0) != 0) {
-            LOGERR("readdir(): %s: %s\n", dbpath, strerror(ENOMEM));
-            return -ENOMEM;
+    odir = ogurelfs_dir(pathname);
+
+    switch(odir) {
+    case OGURELFS_ARTIST:
+        filler(buf, ".", NULL, 0);
+        filler(buf, "..", NULL, 0);
+        filler(buf, "albums", NULL, 0);
+        filler(buf, "tracks", NULL, 0);
+
+        break;
+    default:
+        dirp = (DIR *) (uintptr_t) fi->fh;
+        
+        if(!(entry = readdir(dirp))) {
+            LOGERR("readdir(): %s: %s\n", dbpath, strerror(errno));
+            return -errno;
         }
-    } while((entry = readdir(dirp)) != NULL);
+
+        do {
+            if(filler(buf, entry->d_name, NULL, 0) != 0) {
+                LOGERR("readdir(): %s: %s\n", dbpath, strerror(ENOMEM));
+                return -ENOMEM;
+            }
+        } while((entry = readdir(dirp)) != NULL);
+    }
     
     return 0;
 }
@@ -232,19 +305,29 @@ static int ogurel_getattr(const char *pathname, struct stat *stbuf)
 {
     int res = 0;
     char dbpath[PATH_MAX];
-
+    int odir;
+    
     ogurelfs_dbpath(dbpath, pathname);
     
     DEBUG("getattr(): %s\n", dbpath);
     
     memset(stbuf, 0, sizeof(struct stat));
+    odir = ogurelfs_dir(pathname);
     
-    res = stat(dbpath, stbuf);
-    if(res < 0) {
-        LOGERR("getattr(): %s: %s\n", dbpath, strerror(errno));
-        res = -errno;
+    if(odir == OGURELFS_TRACKS ||
+       odir == OGURELFS_ALBUMS) {
+        stbuf->st_mode = S_IFDIR | 0644;
+        stbuf->st_nlink = 1;
+        stbuf->st_uid = getuid();
+        stbuf->st_gid = getgid();
+    } else {
+        res = stat(dbpath, stbuf);
+        if(res < 0) {
+            LOGERR("getattr(): %s: %s\n", dbpath, strerror(errno));
+            res = -errno;
+        }
     }
-    
+        
     return res;
 }
 

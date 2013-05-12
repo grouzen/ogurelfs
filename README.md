@@ -15,18 +15,17 @@ Search
 --------------------------------------------------------------------------------
 
 Search is initiated by directory or file creation on specific meta file system hierarchy:
-`/artists, /albums, /tracks`
+`Artist/albums, Artist/tracks, Artist/albums/AlbumN, Artists/tracks/TrackN`
 
 1. Searching artist
     - `mkdir artists/Artist` will search artist(s) and if finds will create directory
        `Artist`, directories for albums `Artist/Album1, Artist/AlbumN`, and
        files of tracks inside albums directories.
 2. Searching album
-    - `mkdir albums/Album` like a search of artist, but it will create directories
-       inside artists/ too.
+    - `mkdir albums/Album` or `mkdir artists/albums/Album` like a search of artist, but it will create directories inside artists/ too.
 3. Searching track of artist
-    - `mkdir tracks/Track` is same as searhing album, but it will create directories
-       inside albums/ and artists/
+    - `touch /artists/tracks/Track` is equal to query `Artist - Track`. It's same as searhing album, 
+       but it will create directories inside albums/ and artists/
 
 Results of all search queries will be stored on `ogureldb` directory,
 for example on `~/ogureldb/`.
